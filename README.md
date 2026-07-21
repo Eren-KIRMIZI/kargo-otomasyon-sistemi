@@ -349,6 +349,37 @@ Yeni davranış:
 - Yalnızca gerçek `401 Unauthorized` yanıtında token silinir; ağ hatası veya `502/503` durumunda token korunur.
 - Login formu da ağ hatalarında otomatik **3 deneme** yapar; hata mesajları ağ sorunu ile yanlış şifre arasında ayrıştırılır.
 
+### OpenRouter API Key Havuzu — Otomatik Failover
+
+AI destek chatbotu, OpenRouter API'ye erişmek için **3 API key'den oluşan bir havuz** kullanır. Bu sistem sayesinde bir key'in kotası veya rate limiti dolduğunda kullanıcı hiçbir şey fark etmeden konuşmaya devam edebilir.
+
+**Çalışma Akışı:**
+
+```
+Birincil Key (1. key)
+    │
+    ├─ HTTP 429 (Rate Limit) veya 402 (Quota Bitti) alırsa
+    │   └─► Otomatik → Yedek Key 1 devreye girer
+    │           │
+    │           ├─ O da 429/402 alırsa
+    │           │   └─► Otomatik → Yedek Key 2 devreye girer
+    │           │
+    │           └─ Başarılı → Yanıt üretilir ✅
+    │
+    └─ Başarılı → Yanıt üretilir ✅
+```
+
+**Özellikler:**
+- **Seamless geçiş** — Kullanıcı chatbot'ta konuşurken geçişi fark etmez; yedek key aynı istek içinde denenir ve yanıt üretilir.
+- **Kalıcı hafıza** — Key bir kez değişince uygulama yeniden başlayana kadar o key'de kalır, gereksiz tekrar deneme olmaz.
+- **Log kaydı** — Hangi key'in devreye girdiği ve HTTP hata kodu sunucu loglarına yazılır (`[API KEY ROTATE]` prefix'i ile).
+- **Graceful fallback** — 3 key de tükenirse AI yanıtı yerine bilgi bankasından (RAG) bulunan ilgili belgeler kullanıcıya gösterilir; chatbot tamamen suskunlaşmaz.
+- **Timeout ayrımı** — Ağ zaman aşımı hataları key rotasyonunu tetiklemez; yalnızca kota/rate-limit HTTP kodları (429, 402) geçişi başlatır.
+
+> **Key eklemek / değiştirmek için:** `backend/app/services/ai_support.py` dosyasındaki `_API_KEYS` listesini düzenleyin. Sıralama önemlidir — ilk key birincil, kalanlar sırasıyla yedek olarak kullanılır.
+
+---
+
 ### Denetim Günlüğü
 
 Middleware katmanında çalışan denetim sistemi, tüm yazma işlemlerini (POST, PUT, DELETE) kullanıcı bilgisiyle birlikte kaydeder.

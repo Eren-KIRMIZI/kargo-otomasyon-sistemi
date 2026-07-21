@@ -20,10 +20,56 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_API_KEY = "REDACTED_OPENROUTER_KEY"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "google/gemma-4-31b-it:free"
 API_TIMEOUT = 30.0
+
+# ─────────────────────────────────────────────────────────────
+# MODEL HAVUZU — Birincil model rate-limit yerse yedek model denenir
+# Tüm modeller ücretsiz (OpenRouter :free suffix)
+# ─────────────────────────────────────────────────────────────
+_MODELS: list[str] = [
+    "google/gemma-4-31b-it:free",         # Birincil
+    "google/gemma-4-26b-a4b-it:free",     # Yedek 1
+    "nvidia/nemotron-nano-9b-v2:free",    # Yedek 2
+    "poolside/laguna-xs-2.1:free",        # Yedek 3
+]
+
+# ─────────────────────────────────────────────────────────────
+# API KEY HAVUZU — Otomatik Geçiş (Failover) Sistemi
+# Birincil key hakkı bittiğinde (429/402) sıradaki yedek key
+# devreye girer. Kullanıcı bunu fark etmez.
+# ─────────────────────────────────────────────────────────────
+
+_API_KEYS: list[str] = [
+    "REDACTED_OPENROUTER_KEY",  # Birincil
+    "REDACTED_OPENROUTER_KEY",  # Yedek 1
+    "REDACTED_OPENROUTER_KEY",  # Yedek 2
+]
+
+# Hangi index'te olduğumuzu global olarak takip ediyoruz
+_current_key_index: int = 0
+
+
+def _get_current_key() -> str:
+    """Aktif API key'ini döndürür."""
+    return _API_KEYS[_current_key_index]
+
+
+def _rotate_key() -> bool:
+    """
+    Bir sonraki yedek key'e geçer.
+    Başarılıysa True, tüm key'ler tükendiyse False döndürür.
+    """
+    global _current_key_index
+    if _current_key_index < len(_API_KEYS) - 1:
+        _current_key_index += 1
+        logger.warning(
+            f"[API KEY ROTATE] Key #{_current_key_index} devreye alındı "
+            f"(toplam {len(_API_KEYS)} key'den {_current_key_index + 1}. key aktif)."
+        )
+        return True
+    logger.error("[API KEY ROTATE] Tüm API key'leri tükendi, fallback'e geçiliyor.")
+    return False
 
 # ─────────────────────────────────────────────────────────────
 # KATMAN 2: Şirket Bilgi Bankası (Knowledge Base)
@@ -371,16 +417,21 @@ def layer2_retrieve(query: str, top_k: int = 2) -> list[dict]:
 
 async def layer3_llm(question: str, context_docs: list[dict]) -> str:
     """
-    OpenRouter API kullanarak Cloud LLM modeline RAG context'i + soruyu gönderir.
+    OpenRouter API kullanılarak Cloud LLM'e RAG context + soru gönderilir.
+
+    Çift katmanlı otomatik failover:
+      - Key 429/402  → bir sonraki API key devreye girer.
+      - Model 429    → aynı key ile bir sonraki model denenir.
+    Kullanıcı bu geçişleri fark etmez.
     """
-    
+
     # 1. RAG Context'ini metne dönüştür
     context_text = ""
     if context_docs:
         context_text = "BİLGİ BANKASI İÇERİĞİ:\n"
         for i, doc in enumerate(context_docs, 1):
             context_text += f"[{i}] {doc['doc']['title']}:\n{doc['doc']['content']}\n\n"
-            
+
     system_prompt = (
         "Sen KargoEnterprises şirketinin AI destek asistanısın. "
         "Sana sağlanan 'BİLGİ BANKASI İÇERİĞİ'ne dayanarak kullanıcıların sorunlarını çöz. "
@@ -389,7 +440,6 @@ async def layer3_llm(question: str, context_docs: list[dict]) -> str:
     )
 
     payload = {
-        "model": OPENROUTER_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {
@@ -401,30 +451,80 @@ async def layer3_llm(question: str, context_docs: list[dict]) -> str:
         "max_tokens": 512,
     }
 
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173", # OpenRouter için referans
-        "X-Title": "Kargo AI Support"
-    }
+    # Çift katmanlı failover: her key için tüm modelleri dene
+    for key_attempt in range(len(_API_KEYS) - _current_key_index):
+        active_key = _get_current_key()
+        headers = {
+            "Authorization": f"Bearer {active_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:5173",
+            "X-Title": "Kargo AI Support"
+        }
 
-    try:
-        async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
-            resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
-            resp.raise_for_status()
-            
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-            
-    except httpx.TimeoutException:
-        logger.error("API zaman aşımına uğradı.")
-        return "⏱️ AI API yanıt süresi aşıldı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin."
-    except Exception as e:
-        logger.error(f"API Hatası: {str(e)}")
-        # Hata durumunda RAG içeriğini göster (Fallback)
-        fallback_msg = "⚠️ AI servisine şu an ulaşılamıyor. Ancak aradığınız konuyla ilgili şu bilgileri buldum:\n\n"
-        fallback_msg += "\n".join([f"- **{d['doc']['title']}**: {d['doc']['content'][:150]}..." for d in context_docs[:2]])
-        return fallback_msg
+        for model_index, model_name in enumerate(_MODELS):
+            payload["model"] = model_name
+
+            try:
+                async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+                    resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+
+                    if resp.status_code in (429, 402, 404):
+                        resp_body = resp.text[:200]
+                        # Upstream provider rate-limit mi, yoksa key kotaı mı, yoksa model mi silindi (404)?
+                        if "upstream" in resp_body.lower() or "provider" in resp_body.lower() or resp.status_code == 404:
+                            # Model tarafında sorun → sonraki modeli dene
+                            logger.warning(
+                                f"[MODEL ROTATE] '{model_name}' rate-limited or not found (HTTP {resp.status_code}). "
+                                f"Sonraki model deneniyor..."
+                            )
+                            continue  # model_index döngüsünde bir sonraki
+                        else:
+                            # Key kotaı → sonraki key'e geç
+                            logger.warning(
+                                f"[KEY ROTATE] Key #{_current_key_index + 1} "
+                                f"HTTP {resp.status_code}. Yedek key deneniyor..."
+                            )
+                            rotated = _rotate_key()
+                            if not rotated:
+                                # Tüm key'ler bitti → fallback
+                                fallback_msg = (
+                                    "⚠️ AI servisine şu an ulaşılamıyor. "
+                                    "Ancak aradığınız konuyla ilgili şu bilgileri buldum:\n\n"
+                                )
+                                fallback_msg += "\n".join(
+                                    [f"- **{d['doc']['title']}**: {d['doc']['content'][:150]}..." for d in context_docs[:2]]
+                                )
+                                return fallback_msg
+                            break  # Bu key döngüsünden çık, yeni key ile tüm modelleri yeniden dene
+
+                    elif resp.status_code == 200:
+                        data = resp.json()
+                        content = data["choices"][0]["message"]["content"]
+                        if model_index > 0 or key_attempt > 0:
+                            logger.info(
+                                f"[FAILOVER OK] Yanıt alındı: key=#{_current_key_index + 1}, model='{model_name}'"
+                            )
+                        return content
+
+                    else:
+                        logger.error(
+                            f"[API] Beklenmeyen HTTP {resp.status_code}: {resp.text[:150]}"
+                        )
+                        break  # Model döngüsünden çık
+
+            except httpx.TimeoutException:
+                logger.error(f"[API] Zaman aşımı: key=#{_current_key_index + 1}, model='{model_name}'")
+                return "⏱️ AI API yanıt süresi aşıldı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin."
+            except Exception as e:
+                logger.error(f"[API] Beklenmeyen hata: {str(e)}")
+                break
+
+    # Tüm key + model kombinasyonları başarısız → RAG fallback
+    fallback_msg = "⚠️ AI servisine şu an ulaşılamıyor. Ancak aradığınız konuyla ilgili şu bilgileri buldum:\n\n"
+    fallback_msg += "\n".join(
+        [f"- **{d['doc']['title']}**: {d['doc']['content'][:150]}..." for d in context_docs[:2]]
+    )
+    return fallback_msg
 
 
 # ─────────────────────────────────────────────────────────────
