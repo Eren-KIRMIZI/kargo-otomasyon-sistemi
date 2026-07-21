@@ -61,6 +61,7 @@ Lojistik operasyonlarını merkezi bir platform üzerinden yönetmeye yönelik g
 | passlib[bcrypt] | 1.7.4 | Şifre hashleme |
 | ReportLab | 4.2.0 | PDF üretimi |
 | python-barcode / qrcode | — | Barkod ve QR kod üretimi |
+| **redis[asyncio]** | **5.x** | **Cache ve rate limiting (Memurai / Redis)** |
 
 ### Frontend
 
@@ -90,9 +91,12 @@ KargoEnterprises/
 │   │   │   ├── routes/          # Tüm API endpoint'leri (22 modül)
 │   │   │   └── websockets.py    # WebSocket canlı takip
 │   │   ├── core/
-│   │   │   ├── config.py        # Uygulama ayarları
+│   │   │   ├── config.py        # Uygulama ayarları ve env yönetimi
 │   │   │   ├── database.py      # Veritabanı bağlantısı
-│   │   │   └── audit_middleware.py
+│   │   │   ├── redis_client.py  # Async Redis/Memurai singleton istemcisi
+│   │   │   ├── rate_limiter.py  # Sliding window rate limiter
+│   │   │   ├── security.py      # JWT ve bcrypt şifre yönetimi
+│   │   │   └── audit_middleware.py  # İstek denetim middleware'i
 │   │   ├── models/              # SQLAlchemy ORM modelleri
 │   │   ├── schemas/             # Pydantic şemaları
 │   │   ├── services/            # İş mantığı katmanı
@@ -101,7 +105,13 @@ KargoEnterprises/
 │   ├── requirements.txt
 │   └── .env                     # Ortam değişkenleri (git'e dahil edilmez)
 ├── frontend/
-│   ├── src/                     # React kaynak kodları
+│   ├── src/
+│   │   ├── pages/               # Sayfa bileşenleri
+│   │   ├── components/          # Paylaşılan UI bileşenleri
+│   │   ├── store/
+│   │   │   └── authStore.ts     # Zustand auth state (retry mekanizmalı)
+│   │   └── services/
+│   │       └── api.ts           # Axios istemcisi ve tüm API fonksiyonları
 │   ├── public/                  # Statik dosyalar
 │   ├── index.html
 │   ├── vite.config.ts
@@ -121,7 +131,10 @@ Kurulum öncesinde aşağıdaki araçların sisteminizde kurulu olduğundan emin
 - **Node.js** 18 veya üzeri
 - **npm** 9 veya üzeri
 - **Microsoft SQL Server** (Express sürümü yeterlidir)
-- **ODBC Driver 17 for SQL Server** ([İndirme bağlantısı](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server))
+- **ODBC Driver 18 for SQL Server** ([İndirme bağlantısı](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server))
+- **Memurai** (Windows için önerilen Redis uyumlu sunucu) veya **Redis** 6+ ([Memurai İndirme](https://www.memurai.com/))
+
+> **Not:** Redis / Memurai isteğe bağlıdır. Kurulu değilse uygulama cache ve rate limiting olmadan çalışmaya devam eder. Ancak performans ve API koruma için kurulması **önerilir**.
 
 ---
 
@@ -182,7 +195,7 @@ Uygulama ilk başlatıldığında SQLAlchemy tabloları otomatik olarak oluştur
 # Veritabanı
 DB_SERVER=localhost
 DB_NAME=KargoEnterprise
-DB_DRIVER=ODBC Driver 17 for SQL Server
+DB_DRIVER=ODBC Driver 18 for SQL Server
 DB_TRUSTED_CONNECTION=yes
 
 # Güvenlik
@@ -195,9 +208,19 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 
 # Uygulama
 DEBUG=True
+
+# Redis / Memurai (isteğe bağlı — kapatmak için REDIS_ENABLED=false)
+REDIS_URL=redis://localhost:6379
+REDIS_ENABLED=true
+REDIS_AI_CACHE_TTL=3600        # AI yanıt cache süresi (saniye)
+REDIS_ANALYTICS_CACHE_TTL=60   # Dashboard cache süresi (saniye)
+REDIS_AI_RATE_LIMIT=20         # AI endpoint dakikada max istek
+REDIS_CHAT_RATE_LIMIT=30       # Chatbot dakikada max istek
 ```
 
 > **Uyarı:** `SECRET_KEY` değerini üretim ortamında mutlaka güçlü ve rastgele bir değerle değiştirin. Bu dosyayı asla git'e dahil etmeyin.
+
+> **Redis:** Memurai / Redis kurulu değilse `REDIS_ENABLED=false` yaparak devre dışı bırakabilirsiniz. Sistem cache ve rate limiting olmadan çalışmaya devam eder.
 
 ---
 
@@ -307,7 +330,24 @@ Her sipariş için benzersiz barkod ve QR kod üretilir. PDF fatura ile birlikte
 
 ### Kimlik Doğrulama
 
-JWT tabanlı kimlik doğrulama ile rol bazlı erişim kontrolü uygulanmaktadır. Token süresi yapılandırılabilir.
+JWT tabanlı kimlik doğrulama ile rol bazlı erişim kontrolü uygulanmaktadır. Token süresi yapılandırılabilir. Logout işleminde token Redis blacklist'ine alınır ve kalan ömrü boyunca geçersiz sayılır.
+
+### Cache ve Rate Limiting (Redis / Memurai)
+
+`redis.asyncio` tabanlı async singleton istemcisi üzerinden çalışır. AI endpoint'leri ve chatbot için sliding window rate limiting uygulanır. Analitik dashboard ve AI yanıtları Redis'te TTL ile cache'lenir. Redis / Memurai çalışmıyorsa sistem **graceful fallback** ile cache ve rate limiting olmadan çalışmaya devam eder — hiçbir özellik devre dışı kalmaz.
+
+- `_connection_failed` flag mekanizması ile başarısız bağlantı her API isteğinde tekrar denenmez, gereksiz timeout beklenmez.
+- `health_check_interval=30` ile bağlantı sağlığı otomatik kontrol edilir.
+- Retry mekanizması (`ExponentialBackoff`) ile geçici bağlantı kopmaları otomatik toparlanır.
+
+### Hata Dayanıklı Giriş (Auth Race Condition Çözümü)
+
+Uygulama ilk açıldığında backend henüz hazır olmayabilir (özellikle `start.bat` ile açılışta). Bu durum klasik bir race condition'a yol açıyordu: `initAuth()` backend'e bağlanamayınca token'ı localStorage'dan siliyordu ve kullanıcı doğru bilgilerini girmesine rağmen giriş yapamıyordu.
+
+Yeni davranış:
+- `initAuth` backend hazır olana kadar **3 kez 1.2 saniye aralıkla** retry yapar.
+- Yalnızca gerçek `401 Unauthorized` yanıtında token silinir; ağ hatası veya `502/503` durumunda token korunur.
+- Login formu da ağ hatalarında otomatik **3 deneme** yapar; hata mesajları ağ sorunu ile yanlış şifre arasında ayrıştırılır.
 
 ### Denetim Günlüğü
 

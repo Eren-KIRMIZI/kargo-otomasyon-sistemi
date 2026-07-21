@@ -1,15 +1,17 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, joinedload
+from jose import jwt, JWTError
 
 from app.core import security
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis_client import redis_set
 from app.models.user import User
 from app.schemas.user import Token
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_active_user, oauth2_scheme
 
 router = APIRouter(tags=["auth"])
 
@@ -33,6 +35,35 @@ def login_access_token(
         ),
         "token_type": "bearer",
     }
+
+
+@router.post("/logout", summary="Güvenli çıkış — token blacklist'e alınır")
+async def logout(token: str = Depends(oauth2_scheme)):
+    """
+    Mevcut JWT token'ı Redis blacklist'ine ekler.
+    Token süresi dolana kadar geçersiz sayılır.
+    Redis yoksa çalışmaz ama hata döndürmez (graceful).
+    """
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        jti: str = payload.get("jti", "")
+        exp: int = payload.get("exp", 0)
+
+        if jti and exp:
+            # Token'ın kalan süresini hesapla (sn)
+            now = int(datetime.now(tz=timezone.utc).timestamp())
+            ttl = max(exp - now, 1)
+
+            # Redis'e yaz: "blacklist:<jti>" → "1", TTL = token'ın kalan ömrü
+            await redis_set(f"blacklist:{jti}", "1", ttl_seconds=ttl)
+
+    except JWTError:
+        pass  # Geçersiz token — logout isteği yine de başarılı sayılır
+
+    return {"status": "success", "message": "Başarıyla çıkış yapıldı."}
+
 
 @router.get("/me")
 def get_me(
@@ -72,3 +103,4 @@ def get_me(
         "role": role_value,
         "customer_profile_id": customer_profile_id,
     }
+

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis_client import redis_exists
 from app.models.user import User
 from app.schemas.user import TokenData
 
@@ -13,20 +14,31 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"/api/auth/login/access-token"
 )
 
-def get_current_user(
+async def get_current_user(
     db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)
 ) -> User:
     try:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
-        # Token'da 'sub' alanı username olarak yazılmıştı
         username: str = payload.get("sub")
+        jti: str = payload.get("jti", "")
+
         if not username:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Could not validate credentials",
             )
+
+        # ─── Redis Blacklist Kontrolü ─────────────────────────────────────────
+        # Logout olan kullanıcının token'ı blacklist'te mi?
+        if jti and await redis_exists(f"blacklist:{jti}"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token geçersiz kılınmış. Lütfen tekrar giriş yapın.",
+            )
+        # ─────────────────────────────────────────────────────────────────────
+
         token_data = TokenData(username=username)
     except (JWTError, ValidationError):
         raise HTTPException(
@@ -44,3 +56,4 @@ def get_current_active_user(
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+

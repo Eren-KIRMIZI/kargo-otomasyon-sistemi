@@ -7,11 +7,16 @@ KargoEnterprises - AI Destek Servisi
   Katman 3 → Local LLM (Ollama - qwen3:8b) ile nihai yanıt üretimi
 """
 
+import hashlib
 import httpx
+import json
 import math
 import re
 import logging
 from typing import Optional
+
+from app.core.redis_client import redis_get, redis_set
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -426,17 +431,41 @@ async def layer3_llm(question: str, context_docs: list[dict]) -> str:
 # ANA ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
 
+def _cache_key(message: str) -> str:
+    """Mesajdan deterministik cache anahtarı üretir (SHA256)."""
+    normalized = message.strip().lower()
+    return "ai_cache:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 async def process_chat_message(message: str) -> dict:
     """
     3 katmanlı AI yanıt pipeline'ı:
       1 → Kural kontrolü (anında)
       2 → RAG ile ilgili doküman çekimi
       3 → Ollama LLM ile yanıt üretimi
+
+    Redis Cache:
+      - Katman 1 sonuçları cache'lenmez (zaten anlık).
+      - Katman 2+3 sonuçları {REDIS_AI_CACHE_TTL} saniye cache'lenir.
+      - Aynı soru 1 saat içinde tekrar gelirse Redis'ten döner → OpenRouter çağrısı yok.
     """
-    # Katman 1: Kural Motoru
+    # Katman 1: Kural Motoru (cache bypass — anlık ve ücretsiz)
     rule_result = layer1_check(message)
     if rule_result:
         return rule_result
+
+    # ─── Redis Cache Kontrolü ─────────────────────────────────────────────
+    cache_key = _cache_key(message)
+    cached_raw = await redis_get(cache_key)
+    if cached_raw:
+        try:
+            cached_result = json.loads(cached_raw)
+            cached_result["cache_hit"] = True
+            logger.debug(f"AI Cache HIT: {cache_key[:32]}...")
+            return cached_result
+        except Exception:
+            pass  # Bozuk cache — devam et
+    # ───────────────────────────────────────────────────────────────────
 
     # Katman 2: RAG Vektör Arama
     retrieved_docs = layer2_retrieve(message, top_k=2)
@@ -453,13 +482,14 @@ async def process_chat_message(message: str) -> dict:
     if suggest_ticket and retrieved_docs:
         ticket_subject = retrieved_docs[0]["doc"]["title"]
 
-    return {
+    result = {
         "layer": 3,
         "intent": "rag_llm",
         "reply": llm_reply,
         "priority": "normal",
         "suggest_ticket": suggest_ticket,
         "ticket_subject": ticket_subject,
+        "cache_hit": False,
         "sources": [
             {
                 "id": r["doc"]["id"],
@@ -470,3 +500,17 @@ async def process_chat_message(message: str) -> dict:
             for r in retrieved_docs
         ],
     }
+
+    # ─── Redis'e Kaydet ───────────────────────────────────────────────
+    try:
+        await redis_set(
+            cache_key,
+            json.dumps(result, ensure_ascii=False),
+            ttl_seconds=settings.REDIS_AI_CACHE_TTL,
+        )
+        logger.debug(f"AI Cache SET: {cache_key[:32]}... TTL={settings.REDIS_AI_CACHE_TTL}sn")
+    except Exception as exc:
+        logger.warning(f"AI cache yazma hatası: {exc}")
+    # ─────────────────────────────────────────────────────
+
+    return result

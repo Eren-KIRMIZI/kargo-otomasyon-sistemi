@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 7 days
 
+    # Redis / Memurai
+    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_ENABLED: bool = True
+    REDIS_AI_CACHE_TTL: int = 3600       # AI yanıt cache süresi (sn) — 1 saat
+    REDIS_ANALYTICS_CACHE_TTL: int = 60  # Dashboard cache süresi (sn) — 1 dk
+    REDIS_AI_RATE_LIMIT: int = 20        # AI endpoint: dakikada max istek
+    REDIS_CHAT_RATE_LIMIT: int = 30      # Chatbot: dakikada max istek
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

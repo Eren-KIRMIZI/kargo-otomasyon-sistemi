@@ -1,8 +1,11 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.redis_client import get_redis_client
+from app.core.rate_limiter import is_rate_limited
+from app.core.config import settings
 from app.models.history import OrderHistory
 from app.models.location import Province
 from app.schemas.zone import (
@@ -18,7 +21,21 @@ router = APIRouter(prefix="/ai", tags=["Yapay Zeka"])
 
 
 @router.post("/demand-forecast", response_model=DemandForecastResponse)
-def demand_forecast(payload: DemandForecastRequest, db: Session = Depends(get_db)):
+async def demand_forecast(request: Request, payload: DemandForecastRequest, db: Session = Depends(get_db)):
+    # ─── Rate Limiting ────────────────────────────────────────────────────────
+    client_ip = request.client.host if request.client else "unknown"
+    redis = await get_redis_client()
+    limited, rl_headers = await is_rate_limited(
+        redis, identifier=client_ip, prefix="rl:ai",
+        max_requests=settings.REDIS_AI_RATE_LIMIT, window_seconds=60
+    )
+    if limited:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Çok fazla istek. {rl_headers.get('Retry-After', 60)} saniye sonra tekrar deneyin.",
+            headers=rl_headers,
+        )
+    # ─────────────────────────────────────────────────────────────────────────
     province = db.query(Province).filter(Province.id == payload.province_id).first()
     if not province:
         raise HTTPException(status_code=404, detail="İl bulunamadı")

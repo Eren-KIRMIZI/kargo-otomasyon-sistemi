@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Any, Union
+from uuid import uuid4
 from jose import jwt
 from passlib.context import CryptContext
 
@@ -16,13 +17,22 @@ def get_password_hash(password: str) -> str:
 def create_access_token(
     subject: Union[str, Any], expires_delta: timedelta = None
 ) -> str:
+    """
+    JWT oluşturur.
+    Her token benzersiz bir 'jti' (JWT ID) içerir.
+    Bu sayede token'lar bireysel olarak blacklist'e alınabilir (logout).
+    """
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
-    to_encode = {"exp": expire, "sub": str(subject)}
+    to_encode = {
+        "exp": expire,
+        "sub": str(subject),
+        "jti": str(uuid4()),  # Her token için benzersiz ID
+    }
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )

@@ -9,7 +9,7 @@ from app.schemas.vehicle import VehicleCreate, VehicleUpdate, VehicleOut
 router = APIRouter(prefix="/vehicles", tags=["Araçlar"])
 
 
-@router.post("/", response_model=VehicleOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=VehicleOut, status_code=status.HTTP_201_CREATED)
 def create_vehicle(vehicle_in: VehicleCreate, db: Session = Depends(get_db)):
     db_vehicle = db.query(Vehicle).filter(Vehicle.plate == vehicle_in.plate).first()
     if db_vehicle:
@@ -22,7 +22,7 @@ def create_vehicle(vehicle_in: VehicleCreate, db: Session = Depends(get_db)):
     return new_vehicle
 
 
-@router.get("/", response_model=List[VehicleOut])
+@router.get("", response_model=List[VehicleOut])
 def read_vehicles(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return db.query(Vehicle).order_by(Vehicle.id).offset(skip).limit(limit).all()
 

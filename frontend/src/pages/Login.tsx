@@ -17,48 +17,78 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    try {
-      const formData = new URLSearchParams();
-      formData.append('username', username);
-      formData.append('password', password);
 
-      // 1. Token al
-      const response = await login(formData);
-      const token: string = response.data.access_token;
-      setLogin(token);
+    const MAX_ATTEMPTS = 3;
+    let lastError: any = null;
 
-      // 2. Token'ı doğrudan geçir — interceptor zincirini bypass eder
-      await fetchUser(token);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const formData = new URLSearchParams();
+        formData.append('username', username);
+        formData.append('password', password);
 
-      // 3. Store'dan user'ı oku
-      const { user } = useAuthStore.getState();
-      if (!user) {
-        setError('Kullanıcı bilgisi alınamadı. Lütfen tekrar deneyin.');
-        return;
-      }
+        // 1. Token al
+        const response = await login(formData);
+        const token: string = response.data.access_token;
+        setLogin(token);
 
-      // 4. Rol / panel uyumu kontrolü
-      if (user.role === 'customer') {
-        if (loginType !== 'customer') {
-          setError('Bu hesap müşteri hesabıdır. Lütfen Müşteri Girişi sekmesini kullanınız.');
-          useAuthStore.getState().logout();
+        // 2. Token'ı doğrudan geçir — interceptor zincirini bypass eder
+        await fetchUser(token);
+
+        // 3. Store'dan user'ı oku
+        const { user } = useAuthStore.getState();
+        if (!user) {
+          setError('Kullanıcı bilgisi alınamadı. Lütfen tekrar deneyin.');
+          setLoading(false);
           return;
         }
-        navigate('/customer');
-      } else {
-        if (loginType === 'customer') {
-          setError('Bu hesap yönetici hesabıdır. Lütfen Yönetici Girişi sekmesini kullanınız.');
-          useAuthStore.getState().logout();
-          return;
+
+        // 4. Rol / panel uyumu kontrolü
+        if (user.role === 'customer') {
+          if (loginType !== 'customer') {
+            setError('Bu hesap müşteri hesabıdır. Lütfen Müşteri Girişi sekmesini kullanınız.');
+            useAuthStore.getState().logout();
+            setLoading(false);
+            return;
+          }
+          navigate('/customer');
+        } else {
+          if (loginType === 'customer') {
+            setError('Bu hesap yönetici hesabıdır. Lütfen Yönetici Girişi sekmesini kullanınız.');
+            useAuthStore.getState().logout();
+            setLoading(false);
+            return;
+          }
+          navigate('/');
         }
-        navigate('/');
+        return; // Başarılı — döngüden çık
+
+      } catch (err: any) {
+        lastError = err;
+        const status = err.response?.status;
+
+        // 400/401 = yanlış şifre — retry'a gerek yok
+        if (status === 400 || status === 401) {
+          break;
+        }
+
+        // Ağ hatası veya backend hazır değil — retry yap
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
       }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Giriş başarısız. Bilgilerinizi kontrol edin.');
-    } finally {
-      setLoading(false);
     }
+
+    // Tüm denemeler başarısız
+    const status = lastError?.response?.status;
+    if (status === 400 || status === 401) {
+      setError(lastError.response?.data?.detail || 'Giriş başarısız. Bilgilerinizi kontrol edin.');
+    } else {
+      setError('Sunucuya bağlanılamadı. Backend çalışıyor mu? Lütfen tekrar deneyin.');
+    }
+    setLoading(false);
   };
+
 
   return (
     <div style={{

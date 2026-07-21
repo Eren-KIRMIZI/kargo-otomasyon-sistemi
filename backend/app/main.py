@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.redis_client import get_redis_client, close_redis
 from app.api.routes import locations, depots, couriers, orders, optimize, ai, vehicles, auth, customers, tariffs, warehouse, fleet, analytics, customer_panel, incidents, support, chatbot, live_tracking, weather, corporate, audit_log
 
 from app.api import websockets
@@ -13,10 +14,13 @@ import asyncio
 async def lifespan(app: FastAPI):
     # Başlangıç: tabloları oluştur
     init_db()
+    # Redis / Memurai bağlantısını kur
+    await get_redis_client()
     # Canlı takip simülasyonunu başlat
     asyncio.create_task(websockets.live_tracking_task())
     yield
-    # Kapanış (opsiyonel temizleme)
+    # Kapanış: Redis bağlantısını kapat
+    await close_redis()
 
 
 app = FastAPI(

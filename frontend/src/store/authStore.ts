@@ -67,15 +67,40 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isInitializing: false, isAuthenticated: false });
       return;
     }
-    try {
-      const response = await api.get('/auth/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      set({ user: response.data, isAuthenticated: true, isInitializing: false });
-    } catch {
-      localStorage.removeItem('token');
-      sessionStorage.removeItem('token');
-      set({ token: null, isAuthenticated: false, user: null, isInitializing: false });
+
+    // Backend henüz açılmamış olabilir (uygulama ilk başladığında race condition)
+    // 401 dışındaki hatalarda token'ı silme — sadece retry yap
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 1200;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await api.get('/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        set({ user: response.data, isAuthenticated: true, isInitializing: false });
+        return; // başarı
+      } catch (err: any) {
+        const status = err.response?.status;
+
+        if (status === 401) {
+          // Token gerçekten geçersiz — sil ve çık
+          localStorage.removeItem('token');
+          sessionStorage.removeItem('token');
+          set({ token: null, isAuthenticated: false, user: null, isInitializing: false });
+          return;
+        }
+
+        // Ağ hatası veya backend henüz hazır değil (502, 503, network error)
+        if (attempt < MAX_RETRIES) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          // bir sonraki attempt'e devam
+        } else {
+          // Son deneme de başarısız — token'ı silme, sadece initialized yap
+          // Kullanıcı login ekranını görür ama token kaybolmaz
+          set({ isAuthenticated: false, isInitializing: false });
+        }
+      }
     }
   },
 }));

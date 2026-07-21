@@ -42,7 +42,15 @@ def get_corporate_dashboard(customer_id: int, db: Session = Depends(get_db)):
     """Kurumsal müşteri için özet dashboard verilerini (sipariş hacmi, harcama vb.) döndürür."""
     customer = db.query(CustomerProfile).filter(CustomerProfile.id == customer_id, CustomerProfile.customer_type == "corporate").first()
     if not customer:
-        raise HTTPException(status_code=404, detail="Kurumsal müşteri bulunamadı")
+        # Müşteri DB'de yoksa (örn. frontend mock müşteriler) boş dashboard dön
+        return {
+            "customer_id": customer_id,
+            "company_name": None,
+            "total_orders": 0,
+            "total_spent": 0.0,
+            "success_rate": 0.0,
+            "recent_orders": []
+        }
     
     orders = db.query(Order).filter(Order.sender_customer_id == customer_id).all()
     

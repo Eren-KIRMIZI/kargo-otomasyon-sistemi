@@ -1,0 +1,17 @@
+# Pyrefly Python type checker konfigürasyonu
+# https://github.com/facebook/pyrefly
+
+# Proje venv'ini kullan (fastapi, sqlalchemy, redis vb. burada kurulu)
+python_interpreter = "venv/Scripts/python.exe"
+
+# Backend kaynak kodunu dahil et
+search_path = ["backend"]
+
+# Oluşturulan veya üçüncü taraf dizinleri hariç tut
+exclude = [
+    "venv/**",
+    "node_modules/**",
+    "frontend/**",
+    "**/__pycache__/**",
+    "**/*.pyc",
+]
