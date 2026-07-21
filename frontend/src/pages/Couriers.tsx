@@ -14,6 +14,34 @@ function getInitials(name: string) {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 }
 
+function isFemaleName(name: string) {
+  const firstName = name.split(' ')[0].toLocaleLowerCase('tr-TR');
+  const femaleNames = [
+    'ayşe', 'fatma', 'zeynep', 'elif', 'merve', 'büşra', 'ebru', 'ceren', 'pınar', 'selin', 'gizem', 'tuğçe', 'ece', 'seda', 'aslı', 'derya', 'özlem', 'cansu', 'burcu', 'esra', 'meltem', 'sinem', 'meryem', 'zehra', 'gül', 'nur', 'aylin', 'hande', 'hazal', 'irem', 'melis', 'yasemin', 'buse', 'beyza', 'kübra', 'hilal', 'gamze', 'sevgi', 'ilknur', 'rabia', 'sümeyye', 'şeyma', 'gözde', 'duygu', 'nihal', 'canan', 'demet', 'dilara', 'eda', 'mine', 'neslihan', 'nilay', 'nurcan', 'pelin', 'selda', 'sevim', 'sibel', 'yeşim', 'çiğdem', 'şule', 'ayten', 'gönül', 'hacer', 'hatice', 'havva', 'hülya', 'kadriye', 'leyla', 'melek', 'nermin', 'necla', 'nuray', 'rüya', 'sevil', 'tülay', 'zeliha'
+  ];
+  if (femaleNames.includes(firstName)) return true;
+  if (firstName.endsWith('nur') || firstName.endsWith('gül') || firstName.endsWith('su')) return true;
+  return false;
+}
+
+function getAvatarUrl(id: number, name: string) {
+  const isFemale = isFemaleName(name);
+  if (isFemale) {
+    const images = [
+      '/avatars/courier_2_1784651224530.png',
+      '/avatars/courier_f1_1784651408701.png',
+    ];
+    return images[(id || 0) % images.length];
+  } else {
+    const images = [
+      '/avatars/courier_1_1784651212943.png',
+      '/avatars/courier_3_1784651234312.png',
+      '/avatars/courier_4_1784651245213.png',
+    ];
+    return images[(id || 0) % images.length];
+  }
+}
+
 function StatusChip({ status }: { status: string }) {
   if (status === 'on_delivery') {
     return (
@@ -183,7 +211,7 @@ export default function Couriers() {
                 <div key={c.id} className={`courier-card ${isActive ? 'on-duty' : ''}`}>
                   {/* Avatar */}
                   <div className="courier-avatar">
-                    <div className="courier-avatar-initials">{getInitials(c.name)}</div>
+                    <img src={getAvatarUrl(c.id, c.name)} alt={c.name} className={`courier-avatar-img ${isActive ? 'on-duty' : 'off-duty'}`} />
                     <div className={`courier-status-dot ${isActive ? 'active' : 'idle'}`} />
                   </div>
 
@@ -272,8 +300,9 @@ export default function Couriers() {
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontWeight: 700, fontSize: 13, color: 'var(--accent-orange-light)',
                           flexShrink: 0,
+                          overflow: 'hidden'
                         }}>
-                          {getInitials(c.name)}
+                          <img src={getAvatarUrl(c.id, c.name)} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         </div>
                         <div>
                           <div style={{ fontWeight: 600 }}>{c.name}</div>

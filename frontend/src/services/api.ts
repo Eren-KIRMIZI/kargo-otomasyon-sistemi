@@ -9,7 +9,7 @@ export const api = axios.create({
 });
 
 const requestInterceptorId = api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = sessionStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -21,8 +21,8 @@ const responseInterceptorId = api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
       sessionStorage.removeItem('token');
+      localStorage.removeItem('token');
       // Login sayfasındayken redirect YAPMA — spinner döngüsünü önler
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';

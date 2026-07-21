@@ -814,7 +814,7 @@ export default function Support() {
                   const message = prompt('Açıklama:') || subject;
                   fetch(`${API_BASE}/api/support`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('token') || ''}` },
                     body: JSON.stringify({ subject, message }),
                   })
                     .then(r => r.ok ? r.json() : Promise.reject())

@@ -53,8 +53,7 @@ function formatDate(ts: string) {
 }
 
 function getToken() {
-  try { return JSON.parse(localStorage.getItem('auth-store') || '{}')?.state?.token || ''; }
-  catch { return ''; }
+  return sessionStorage.getItem('token') || '';
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

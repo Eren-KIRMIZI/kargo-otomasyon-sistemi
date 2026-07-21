@@ -25,25 +25,25 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  token: localStorage.getItem('token'),
+  token: sessionStorage.getItem('token'),
   isAuthenticated: false,
   user: null,
   isInitializing: true,
 
   login: (token: string) => {
-    localStorage.setItem('token', token);
-    sessionStorage.removeItem('token');
+    sessionStorage.setItem('token', token);
+    localStorage.removeItem('token');
     set({ token, isAuthenticated: true });
   },
 
   logout: () => {
-    localStorage.removeItem('token');
     sessionStorage.removeItem('token');
+    localStorage.removeItem('token');
     set({ token: null, isAuthenticated: false, user: null });
   },
 
   fetchUser: async (tokenOverride?: string) => {
-    const effectiveToken = tokenOverride ?? localStorage.getItem('token');
+    const effectiveToken = tokenOverride ?? sessionStorage.getItem('token');
     try {
       // api instance kullan — CORS ve base URL tutarlı kalır
       // Authorization header'ı doğrudan ekle — interceptor'a bağımlı değil
@@ -54,15 +54,15 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       set({ user: response.data, isAuthenticated: true });
     } catch (error) {
-      localStorage.removeItem('token');
       sessionStorage.removeItem('token');
+      localStorage.removeItem('token');
       set({ token: null, isAuthenticated: false, user: null });
       throw error;
     }
   },
 
   initAuth: async () => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     if (!token) {
       set({ isInitializing: false, isAuthenticated: false });
       return;
@@ -85,8 +85,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
         if (status === 401) {
           // Token gerçekten geçersiz — sil ve çık
-          localStorage.removeItem('token');
           sessionStorage.removeItem('token');
+          localStorage.removeItem('token');
           set({ token: null, isAuthenticated: false, user: null, isInitializing: false });
           return;
         }
