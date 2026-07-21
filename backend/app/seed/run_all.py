@@ -14,6 +14,7 @@ from app.seed.depot_seeder import seed_depots
 from app.seed.courier_seeder import seed_couriers
 from app.seed.order_seeder import seed_orders
 from app.seed.extended_seeder import seed_extended_features
+from app.seed.additional_seeder import seed_additional_data
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -21,29 +22,33 @@ if __name__ == "__main__":
     print("=" * 50)
     print()
 
-    print("1/6 — Tablolar oluşturuluyor...")
+    print("1/7 — Tablolar oluşturuluyor...")
     init_db()
     print("✓ Tablolar hazır.")
     print()
 
-    print("2/6 — İl/ilçe verileri yükleniyor...")
+    print("2/7 — İl/ilçe verileri yükleniyor...")
     seed_locations()
     print()
 
-    print("3/6 — Depolar yükleniyor...")
+    print("3/7 — Depolar yükleniyor...")
     seed_depots()
     print()
 
-    print("4/6 — Kuryeler yükleniyor...")
+    print("4/7 — Kuryeler yükleniyor...")
     seed_couriers()
     print()
 
-    print("5/6 — Siparişler ve geçmiş veriler yükleniyor...")
+    print("5/7 — Siparişler ve geçmiş veriler yükleniyor...")
     seed_orders()
     print()
 
-    print("6/6 — Yeni Modüller (Müşteriler, Araçlar, Raflar, Tarifeler)...")
+    print("6/7 — Yeni Modüller (Müşteriler, Araçlar, Raflar, Tarifeler)...")
     seed_extended_features()
+    print()
+
+    print("7/7 — Ek veriler (Incidents, Destek, Transferler, Kampanyalar)...")
+    seed_additional_data()
     print()
 
     print("=" * 50)

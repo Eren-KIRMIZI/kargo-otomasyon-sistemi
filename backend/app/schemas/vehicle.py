@@ -27,6 +27,10 @@ class VehicleUpdate(BaseModel):
 
 class VehicleOut(VehicleBase):
     id: int
+    year: Optional[int] = None
+    current_mileage: Optional[float] = None
+    depot_id: Optional[int] = None
+    vehicle_type: Optional[str] = None
     status: str
     is_active: bool
     created_at: datetime
