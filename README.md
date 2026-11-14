@@ -4,6 +4,9 @@
 
 Lojistik operasyonlarını merkezi bir platform üzerinden yönetmeye yönelik geliştirilmiş tam kapsamlı bir kurumsal kargo yönetim sistemidir. Sipariş takibi, rota optimizasyonu, depo yönetimi, kurye ve araç filosu takibi, müşteri paneli ve canlı harita görüntüleme gibi modülleri tek çatı altında sunar.
 
+Video: 
+https://www.youtube.com/watch?v=EwpZD3EU_jE
+
 ---
 
 ## İçindekiler
