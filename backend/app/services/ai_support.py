@@ -40,11 +40,12 @@ _MODELS: list[str] = [
 # devreye girer. Kullanıcı bunu fark etmez.
 # ─────────────────────────────────────────────────────────────
 
-_API_KEYS: list[str] = [
-    "REDACTED_OPENROUTER_KEY",  # Birincil
-    "REDACTED_OPENROUTER_KEY",  # Yedek 1
-    "REDACTED_OPENROUTER_KEY",  # Yedek 2
-]
+import os
+
+_env_keys_str = os.getenv("OPENROUTER_API_KEYS") or os.getenv("OPENROUTER_API_KEY") or ""
+_API_KEYS: list[str] = [k.strip() for k in _env_keys_str.split(",") if k.strip()]
+if not _API_KEYS:
+    _API_KEYS = [""]
 
 # Hangi index'te olduğumuzu global olarak takip ediyoruz
 _current_key_index: int = 0
